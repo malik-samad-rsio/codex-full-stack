@@ -1,0 +1,55 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm ci
+      - run: npm run build
+      - name: Build server image
+        run: docker build -f Dockerfile.server -t ${{ github.sha }}-server .
+      - name: Build client image
+        run: docker build -f Dockerfile.client -t ${{ github.sha }}-client .
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push images
+        run: |
+          docker tag ${{ github.sha }}-server ${{ env.ECR_SERVER }}:${{ github.sha }}
+          docker tag ${{ github.sha }}-client ${{ env.ECR_CLIENT }}:${{ github.sha }}
+          docker push ${{ env.ECR_SERVER }}:${{ github.sha }}
+          docker push ${{ env.ECR_CLIENT }}:${{ github.sha }}
+      - name: Deploy
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: codex-stack
+          template: cloudformation.yaml
+          parameter-overrides: |
+            ServerImage=${{ env.ECR_SERVER }}:${{ github.sha }}
+            ClientImage=${{ env.ECR_CLIENT }}:${{ github.sha }}
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM
+
+  staging:
+    if: github.ref != 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: codex-stack-staging
+          template: cloudformation.yaml
+          parameter-overrides: |
+            ServerImage=${{ env.ECR_SERVER }}:${{ github.sha }}
+            ClientImage=${{ env.ECR_CLIENT }}:${{ github.sha }}
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM

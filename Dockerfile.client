@@ -1,0 +1,11 @@
+FROM node:18-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* tsconfig.json ./
+COPY src ./src
+RUN npm install && npm run bundle
+
+FROM node:18-alpine
+WORKDIR /usr/share/nginx/html
+RUN npm install -g http-server
+COPY --from=build /app/dist/client-bundle ./
+CMD ["http-server", ".", "-p", "8080"]
